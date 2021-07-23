@@ -24,8 +24,9 @@
 
 package io.questdb.cairo;
 
-import io.questdb.cairo.vm.Mappable;
-import io.questdb.cairo.vm.PagedMappedReadWriteMemory;
+import io.questdb.cairo.vm.CMARWMemoryImpl;
+import io.questdb.cairo.vm.api.CMARWMemory;
+import io.questdb.cairo.vm.api.CMRMemory;
 import io.questdb.std.FilesFacade;
 import io.questdb.std.ObjList;
 import io.questdb.std.Unsafe;
@@ -36,13 +37,12 @@ import java.io.Closeable;
 import static io.questdb.cairo.TableUtils.*;
 
 public final class TxWriter extends TxReader implements Closeable {
+    protected long prevTransientRowCount;
     private int attachedPositionDirtyIndex;
     private int txPartitionCount;
     private long prevMaxTimestamp;
     private long prevMinTimestamp;
-    protected long prevTransientRowCount;
-
-    private PagedMappedReadWriteMemory txMem;
+    private CMARWMemory txMem;
 
     public TxWriter(FilesFacade ff, Path path, int partitionBy) {
         super(ff, path, partitionBy);
@@ -146,10 +146,10 @@ public final class TxWriter extends TxReader implements Closeable {
     }
 
     @Override
-    protected Mappable openTxnFile(FilesFacade ff, Path path, int rootLen) {
+    protected CMRMemory openTxnFile(FilesFacade ff, Path path, int rootLen) {
         try {
             if (ff.exists(path.concat(TXN_FILE_NAME).$())) {
-                return txMem = new PagedMappedReadWriteMemory(ff, path, ff.getPageSize());
+                return txMem = new CMARWMemoryImpl(ff, path, ff.getPageSize(), Long.MAX_VALUE);
             }
             throw CairoException.instance(ff.errno()).put("Cannot append. File does not exist: ").put(path);
 
@@ -179,7 +179,7 @@ public final class TxWriter extends TxReader implements Closeable {
         Unsafe.getUnsafe().storeFence();
         txMem.putLong(TX_OFFSET_TXN_CHECK, txn);
         if (commitMode != CommitMode.NOSYNC) {
-            txMem.sync(0, commitMode == CommitMode.ASYNC);
+            txMem.sync(commitMode == CommitMode.ASYNC);
         }
 
         prevTransientRowCount = transientRowCount;
@@ -274,9 +274,9 @@ public final class TxWriter extends TxReader implements Closeable {
     }
 
     public void setMinTimestamp(long timestamp) {
-            minTimestamp = timestamp;
-            if (prevMinTimestamp == Long.MAX_VALUE) {
-                prevMinTimestamp = minTimestamp;
+        minTimestamp = timestamp;
+        if (prevMinTimestamp == Long.MAX_VALUE) {
+            prevMinTimestamp = minTimestamp;
         }
     }
 

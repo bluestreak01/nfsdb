@@ -22,55 +22,45 @@
  *
  ******************************************************************************/
 
-package io.questdb.cairo.vm;
+package io.questdb.cairo.vm.api;
 
 import io.questdb.std.BinarySequence;
 import io.questdb.std.Long256;
 import org.jetbrains.annotations.NotNull;
 
-public interface WriteOnlyVirtualMemory {
+import java.io.Closeable;
+
+public interface AppendMemory extends Closeable {
+
+
+    long appendAddressFor(long bytes);
+
+    @Override
+    void close();
 
     void jumpTo(long offset);
-
-    void putBlockOfBytes(long from, long len);
 
     long putBin(BinarySequence value);
 
     long putBin(long from, long len);
 
+    void putBlockOfBytes(long from, long len);
+
     void putBool(boolean value);
-
-    void putBool(long offset, boolean value);
-
-    void putByte(long offset, byte value);
 
     void putByte(byte b);
 
-    void putChar(long offset, char value);
-
     void putChar(char value);
-
-    void putDouble(long offset, double value);
 
     void putDouble(double value);
 
-    void putFloat(long offset, float value);
-
     void putFloat(float value);
 
-    void putInt(long offset, int value);
-
     void putInt(int value);
-
-    void putLong(long offset, long value);
 
     void putLong(long value);
 
     void putLong128(long l1, long l2);
-
-    void putLong256(long offset, Long256 value);
-
-    void putLong256(long offset, long l0, long l1, long l2, long l3);
 
     void putLong256(long l0, long l1, long l2, long l3);
 
@@ -84,10 +74,6 @@ public interface WriteOnlyVirtualMemory {
 
     long putNullStr();
 
-    void putNullStr(long offset);
-
-    void putShort(long offset, short value);
-
     void putShort(short value);
 
     long putStr(CharSequence value);
@@ -96,7 +82,9 @@ public interface WriteOnlyVirtualMemory {
 
     long putStr(CharSequence value, int pos, int len);
 
-    void putStr(long offset, CharSequence value);
+    void skip(long bytes);
 
-    void putStr(long offset, CharSequence value, int pos, int len);
+    long getAppendOffset();
+
+    void truncate();
 }

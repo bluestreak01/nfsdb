@@ -22,22 +22,46 @@
  *
  ******************************************************************************/
 
-package io.questdb.cairo.vm;
+package io.questdb.cairo.vm.api;
 
-import io.questdb.std.FilesFacade;
-import io.questdb.std.str.LPSZ;
+import io.questdb.std.Long256;
 
 import java.io.Closeable;
 
-public interface Mappable extends Closeable {
+public interface WriteMemory extends Closeable {
+
+    long appendAddressFor(long offset, long bytes);
+
     @Override
     void close();
 
-    void of(FilesFacade ff, LPSZ name, long pageSize, long size);
+    void putBlockOfBytes(long offset, long from, long len);
 
-    void of(FilesFacade ff, LPSZ name, long pageSize);
+    void putBool(long offset, boolean value);
 
-    boolean isDeleted();
+    void putByte(long offset, byte value);
 
-    long getFd();
+    void putChar(long offset, char value);
+
+    void putDouble(long offset, double value);
+
+    void putFloat(long offset, float value);
+
+    void putInt(long offset, int value);
+
+    void putLong(long offset, long value);
+
+    void putLong256(long offset, Long256 value);
+
+    void putLong256(long offset, long l0, long l1, long l2, long l3);
+
+    void putNullStr(long offset);
+
+    void putShort(long offset, short value);
+
+    void putStr(long offset, CharSequence value);
+
+    void putStr(long offset, CharSequence value, int pos, int len);
+
+    void truncate();
 }

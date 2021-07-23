@@ -31,7 +31,6 @@ import io.questdb.std.str.CharSink;
 import jdk.internal.math.FDBigInteger;
 //#endif
 
-
 import java.util.Arrays;
 
 public final class Numbers {

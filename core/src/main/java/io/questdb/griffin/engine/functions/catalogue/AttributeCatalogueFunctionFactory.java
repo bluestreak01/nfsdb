@@ -26,11 +26,10 @@ package io.questdb.griffin.engine.functions.catalogue;
 
 import io.questdb.cairo.*;
 import io.questdb.cairo.sql.*;
-import io.questdb.cairo.vm.MappedReadOnlyMemory;
-import io.questdb.cairo.vm.SinglePageMappedReadOnlyPageMemory;
+import io.questdb.cairo.vm.CMRMemoryImpl;
 import io.questdb.cairo.vm.VmUtils;
+import io.questdb.cairo.vm.api.MRMemory;
 import io.questdb.griffin.FunctionFactory;
-import io.questdb.griffin.SqlException;
 import io.questdb.griffin.SqlExecutionContext;
 import io.questdb.griffin.engine.functions.CursorFunction;
 import io.questdb.std.*;
@@ -55,7 +54,13 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
     }
 
     @Override
-    public Function newInstance(int position, ObjList<Function> args, IntList argPositions, CairoConfiguration configuration, SqlExecutionContext sqlExecutionContext) {
+    public Function newInstance(
+            int position,
+            ObjList<Function> args,
+            IntList argPositions,
+            CairoConfiguration configuration,
+            SqlExecutionContext sqlExecutionContext
+    ) {
         return new CursorFunction(
                 new AttributeCatalogueCursorFactory(
                         configuration,
@@ -72,7 +77,7 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
     private static class AttributeCatalogueCursorFactory extends AbstractRecordCursorFactory {
 
         private final Path path = new Path();
-        private final MappedReadOnlyMemory metaMem = new SinglePageMappedReadOnlyPageMemory();
+        private final MRMemory metaMem = new CMRMemoryImpl();
         private final AttributeClassCatalogueCursor cursor;
 
         public AttributeCatalogueCursorFactory(CairoConfiguration configuration, RecordMetadata metadata) {
@@ -87,7 +92,7 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
         }
 
         @Override
-        public RecordCursor getCursor(SqlExecutionContext executionContext) throws SqlException {
+        public RecordCursor getCursor(SqlExecutionContext executionContext) {
             cursor.toTop();
             return cursor;
         }
@@ -104,7 +109,7 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
         private final DiskReadingRecord diskReadingRecord = new DiskReadingRecord();
         private final NativeLPSZ nativeLPSZ = new NativeLPSZ();
         private final int plimit;
-        private final MappedReadOnlyMemory metaMem;
+        private final MRMemory metaMem;
         private long findFileStruct = 0;
         private int columnIndex = 0;
         private int tableId = 1000;
@@ -113,7 +118,7 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
         private boolean hasNextFile = true;
         private boolean foundMetadataFile = false;
 
-        public AttributeClassCatalogueCursor(CairoConfiguration configuration, Path path, MappedReadOnlyMemory metaMem) {
+        public AttributeClassCatalogueCursor(CairoConfiguration configuration, Path path, MRMemory metaMem) {
             this.ff = configuration.getFilesFacade();
             this.path = path;
             this.path.of(configuration.getRoot()).$();
@@ -177,7 +182,7 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
                             path.concat(pname);
                             if (ff.exists(path.concat(TableUtils.META_FILE_NAME).$())) {
                                 foundMetadataFile = true;
-                                metaMem.of(ff, path, ff.getPageSize(), ff.length(path));
+                                metaMem.wholeFile(ff, path);
                                 columnCount = metaMem.getInt(TableUtils.META_OFFSET_COUNT);
                                 tableId = metaMem.getInt(TableUtils.META_OFFSET_TABLE_ID);
                             }
@@ -219,29 +224,9 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
         }
 
         static class DiskReadingRecord implements Record {
-            public CharSequence name = null;
             public final short[] shortValues = new short[9];
             public final int[] intValues = new int[9];
-
-            @Override
-            public short getShort(int col) {
-                return shortValues[col];
-            }
-
-            @Override
-            public int getInt(int col) {
-                return intValues[col];
-            }
-
-            @Override
-            public CharSequence getStr(int col) {
-                return name;
-            }
-
-            @Override
-            public CharSequence getStrB(int col) {
-                return name;
-            }
+            public CharSequence name = null;
 
             @Override
             public boolean getBool(int col) {
@@ -253,6 +238,26 @@ public class AttributeCatalogueFunctionFactory implements FunctionFactory {
                 //from the PG docs:
                 // attidentity ->	If a zero byte (''), then not an identity column. Otherwise, a = generated always, d = generated by default.
                 return Character.MIN_VALUE;
+            }
+
+            @Override
+            public int getInt(int col) {
+                return intValues[col];
+            }
+
+            @Override
+            public short getShort(int col) {
+                return shortValues[col];
+            }
+
+            @Override
+            public CharSequence getStr(int col) {
+                return name;
+            }
+
+            @Override
+            public CharSequence getStrB(int col) {
+                return name;
             }
 
             @Override

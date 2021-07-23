@@ -26,8 +26,8 @@ package io.questdb.cairo;
 
 import io.questdb.cairo.sql.Record;
 import io.questdb.cairo.sql.RecordCursor;
-import io.questdb.cairo.vm.AppendOnlyVirtualMemory;
-import io.questdb.cairo.vm.ContiguousVirtualMemory;
+import io.questdb.cairo.vm.MAMemoryImpl;
+import io.questdb.cairo.vm.CARWMemoryImpl;
 import io.questdb.cairo.vm.PagedMappedReadWriteMemory;
 import io.questdb.log.Log;
 import io.questdb.log.LogFactory;
@@ -974,7 +974,7 @@ public class TableWriterTest extends AbstractCairoTest {
 
             // this contraption will verify that all timestamps that are
             // supposed to be stored have matching partitions
-            try (ContiguousVirtualMemory vmem = new ContiguousVirtualMemory(FF.getPageSize(), Integer.MAX_VALUE)) {
+            try (CARWMemoryImpl vmem = new CARWMemoryImpl(FF.getPageSize(), Integer.MAX_VALUE)) {
                 try (TableWriter writer = new TableWriter(configuration, PRODUCT)) {
                     long ts = TimestampFormatUtils.parseTimestamp("2013-03-04T00:00:00.000Z");
                     int i = 0;
@@ -1132,7 +1132,7 @@ public class TableWriterTest extends AbstractCairoTest {
 
             // this contraption will verify that all timestamps that are
             // supposed to be stored have matching partitions
-            try (ContiguousVirtualMemory vmem = new ContiguousVirtualMemory(ff.getPageSize(), Integer.MAX_VALUE)) {
+            try (CARWMemoryImpl vmem = new CARWMemoryImpl(ff.getPageSize(), Integer.MAX_VALUE)) {
                 try (TableWriter writer = new TableWriter(new DefaultCairoConfiguration(root) {
                     @Override
                     public FilesFacade getFilesFacade() {
@@ -1203,7 +1203,7 @@ public class TableWriterTest extends AbstractCairoTest {
 
             // this contraption will verify that all timestamps that are
             // supposed to be stored have matching partitions
-            try (ContiguousVirtualMemory vmem = new ContiguousVirtualMemory(ff.getPageSize(), Integer.MAX_VALUE)) {
+            try (CARWMemoryImpl vmem = new CARWMemoryImpl(ff.getPageSize(), Integer.MAX_VALUE)) {
                 try (TableWriter writer = new TableWriter(new DefaultCairoConfiguration(root) {
                     @Override
                     public FilesFacade getFilesFacade() {
@@ -1716,7 +1716,7 @@ public class TableWriterTest extends AbstractCairoTest {
                 mem.of(FilesFacadeImpl.INSTANCE, path, FilesFacadeImpl.INSTANCE.getPageSize());
                 mem.putLong(32, 1);
                 mem.putLong(40, 9990001L);
-                mem.setSize(48);
+                mem.jumpTo(48);
             }
             try (TableWriter writer = new TableWriter(configuration, "all")) {
                 Assert.assertNotNull(writer);
@@ -2624,9 +2624,9 @@ public class TableWriterTest extends AbstractCairoTest {
                 w.commit();
 
                 for (int i = 0, n = w.columns.size(); i < n; i++) {
-                    AppendOnlyVirtualMemory m = w.columns.getQuick(i);
+                    MAMemoryImpl m = w.columns.getQuick(i);
                     if (m != null) {
-                        Assert.assertEquals(configuration.getAppendPageSize(), m.getMapPageSize());
+                        Assert.assertEquals(configuration.getAppendPageSize(), m.getExtendSegmentSize());
                     }
                 }
             }
@@ -3282,59 +3282,6 @@ public class TableWriterTest extends AbstractCairoTest {
         return ts;
     }
 
-    void testCommitRetryAfterFailure(CountingFilesFacade ff) throws Exception {
-        TestUtils.assertMemoryLeak(() -> {
-            long failureCount = 0;
-            final int N = 10000;
-            create(ff, PartitionBy.DAY, N);
-            boolean valid = false;
-            try (TableWriter writer = new TableWriter(new DefaultCairoConfiguration(root) {
-                @Override
-                public FilesFacade getFilesFacade() {
-                    return ff;
-                }
-            }, PRODUCT)) {
-
-                long ts = TimestampFormatUtils.parseTimestamp("2013-03-04T00:00:00.000Z");
-
-                Rnd rnd = new Rnd();
-                for (int i = 0; i < N; i++) {
-                    // one record per hour
-                    ts = populateRow(writer, ts, rnd, 10L * 60000L * 1000L);
-                    // do not commit often, let transaction size grow
-                    if (rnd.nextPositiveInt() % 100 == 0) {
-
-                        // reduce frequency of failures
-                        boolean fail = rnd.nextPositiveInt() % 20 == 0;
-                        if (fail) {
-                            // if we destined to fail, prepare to retry commit
-                            try {
-                                // do not fail on first partition, fail on last
-                                ff.count = writer.getTxPartitionCount() - 1;
-                                valid = valid || writer.getTxPartitionCount() > 1;
-                                writer.commit();
-                                // sometimes commit may pass because transaction does not span multiple partition
-                                // out transaction size is random after all
-                                // if this happens return count to non-failing state
-                                ff.count = Long.MAX_VALUE;
-                            } catch (CairoException e) {
-                                failureCount++;
-                                ff.count = Long.MAX_VALUE;
-                                writer.commit();
-                            }
-                        } else {
-                            writer.commit();
-                        }
-                    }
-                }
-            }
-            // test is valid if we covered cases of failed commit on transactions that span
-            // multiple partitions
-            Assert.assertTrue(valid);
-            Assert.assertTrue(failureCount > 0);
-        });
-    }
-
     private void testConstructor(FilesFacade ff) throws Exception {
         testConstructor(ff, true);
     }
@@ -3421,45 +3368,6 @@ public class TableWriterTest extends AbstractCairoTest {
                         ts = ts2;
                     } else {
                         ts1 += 60 * 1000L;
-                        ts = ts1;
-                    }
-                    r = writer.newRow(ts);
-                    r.putInt(0, rnd.nextPositiveInt());
-                    r.putStr(1, rnd.nextString(7));
-                    r.putSym(2, rnd.nextString(4));
-                    r.putSym(3, rnd.nextString(11));
-                    r.putDouble(4, rnd.nextDouble());
-                    r.append();
-                    i++;
-                }
-                writer.commit();
-                Assert.assertEquals(N, writer.size());
-            }
-
-            try (TableWriter writer = new TableWriter(configuration, PRODUCT)) {
-                Assert.assertEquals(N, writer.size());
-            }
-        });
-    }
-
-    private void testOutOfOrderRecords(int N) throws Exception {
-        TestUtils.assertMemoryLeak(() -> {
-            try (TableWriter writer = new TableWriter(configuration, PRODUCT)) {
-
-                long ts;
-                long ts1 = TimestampFormatUtils.parseTimestamp("2013-03-04T00:00:00.000Z");
-                long ts2 = TimestampFormatUtils.parseTimestamp("2013-03-04T00:00:00.000Z");
-
-                Rnd rnd = new Rnd();
-                int i = 0;
-                while (i < N) {
-                    TableWriter.Row r;
-                    boolean fail = rnd.nextBoolean();
-                    if (fail) {
-                        ts2 += 60 * 6000L * 1000L;
-                        ts = ts2;
-                    } else {
-                        ts1 += 60 * 6000L * 1000L;
                         ts = ts1;
                     }
                     r = writer.newRow(ts);
@@ -3790,7 +3698,7 @@ public class TableWriterTest extends AbstractCairoTest {
                     // table in inconsistent state to recover from which
                     // truncate has to be repeated
                     try {
-                        ff.count = 3;
+                        ff.count = 6;
                         writer.truncate();
                         Assert.fail();
                     } catch (CairoException e) {
@@ -3926,7 +3834,7 @@ public class TableWriterTest extends AbstractCairoTest {
         });
     }
 
-    void verifyTimestampPartitions(ContiguousVirtualMemory vmem) {
+    void verifyTimestampPartitions(CARWMemoryImpl vmem) {
         int i;
         TimestampFormatCompiler compiler = new TimestampFormatCompiler();
         DateFormat fmt = compiler.compile("yyyy-MM-dd");

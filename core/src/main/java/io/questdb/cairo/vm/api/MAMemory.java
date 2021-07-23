@@ -22,8 +22,7 @@
  *
  ******************************************************************************/
 
-package io.questdb.cairo.vm;
+package io.questdb.cairo.vm.api;
 
-public interface MappedReadWriteMemory extends Mappable, ReadWriteVirtualMemory, MappedReadOnlyMemory {
-    void setSize(long size);
+public interface MAMemory extends MappedMemory, AppendMemory {
 }
